@@ -288,14 +288,48 @@
         // =========================================================================
         // [설정 1] Firebase 프로젝트 설정 (내 Firebase 웹앱의 firebaseConfig 값으로 { } 안을 통째로 교체)
         // =========================================================================
-        const firebaseConfig = {
-            apiKey: "여기에_FIREBASE_API_KEY",
-            authDomain: "여기에_PROJECT_ID.firebaseapp.com",
-            projectId: "여기에_PROJECT_ID",
-            storageBucket: "여기에_STORAGE_BUCKET",
-            messagingSenderId: "여기에_MESSAGING_SENDER_ID",
-            appId: "여기에_APP_ID"
-        };
+       rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid','name','email','role','createdAt'])
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == 'member';
+      allow update: if signedIn() && (
+        (request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']))
+        || (isAdmin() && request.auth.uid != uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+          && request.resource.data.role in ['member', 'approved'])
+      );
+      allow delete: if false;
+    }
+    match /comments/{commentId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid','name','text','parentId','likes','createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.text is string
+        && (request.resource.data.parentId == null || request.resource.data.parentId is string)
+        && request.resource.data.likes == 0;
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
+        && request.resource.data.likes == resource.data.likes + 1;
+      allow delete: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+    }
+  }
+}
+
 
         // =========================================================================
         // [설정 2] Supabase Edge Function URL 설정
